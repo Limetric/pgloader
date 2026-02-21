@@ -33,3 +33,17 @@ services:
         condition: service_healthy
     command: >
       pgloader mysql://root:root@mysql/testdb pgsql://postgres:postgres@postgres/testdb
+
+  verify:
+    image: postgres:18
+    depends_on:
+      pgloader:
+        condition: service_completed_successfully
+    environment:
+      PGPASSWORD: postgres
+    command: >
+      sh -c '
+        psql -h postgres -U postgres -d testdb -c "\dt" &&
+        psql -h postgres -U postgres -d testdb -c "SELECT count(*) AS employee_count FROM employees;" &&
+        psql -h postgres -U postgres -d testdb -c "SELECT count(*) AS dept_emp_count FROM dept_emp;"
+      '

@@ -18,13 +18,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Run MySQL → PostgreSQL migration test
-        run: docker compose up --build --exit-code-from pgloader
-
-      - name: Verify migrated data
-        run: |
-          docker compose exec -T postgres psql -U postgres -d testdb -c '\dt'
-          docker compose exec -T postgres psql -U postgres -d testdb -c 'SELECT count(*) FROM employees;'
+      - name: Run migration and verify
+        run: docker compose up --build --exit-code-from verify
 
       - name: Teardown
         if: always()
