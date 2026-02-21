@@ -10,6 +10,8 @@
                #:postmodern		; PostgreSQL protocol implementation
                #:cl-postgres		; low level bits for COPY streaming
                #:simple-date		; FIXME: recheck dependency
+               #:asn1                   ; RSA key parsing for MySQL caching_sha2_password
+               #:trivia                 ; Pattern matching, needed by asn1
                #:qmynd                  ; MySQL protocol implemenation
                #:split-sequence         ; some parsing is made easy
                #:cl-csv                 ; full CSV reader
