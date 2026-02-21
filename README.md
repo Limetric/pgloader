@@ -1,100 +1,74 @@
-# PGLoader
+# pgloader (MySQL 8.4+ compatibility fork)
 
-[![Build Status](https://travis-ci.org/dimitri/pgloader.svg?branch=master)](https://travis-ci.org/dimitri/pgloader)
-[![Join the chat at https://gitter.im/dimitri/pgloader](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/dimitri/pgloader?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
-[![Read The Docs Status](https://readthedocs.org/projects/pgloader/badge/?version=latest&style=plastic)](http://pgloader.readthedocs.io/en/latest/)
+This is a fork of [dimitri/pgloader](https://github.com/dimitri/pgloader) that fixes MySQL 8.4+ and 9.0+ connectivity.
 
-pgloader is a data loading tool for PostgreSQL, using the `COPY` command.
+Upstream pgloader fails to connect to MySQL 8.4+ because these versions use `caching_sha2_password` as the default authentication method. The underlying MySQL protocol library ([qmynd](https://github.com/qitab/qmynd)) has two issues:
 
-Its main advantage over just using `COPY` or `\copy`, and over using a
-*Foreign Data Wrapper*, is its transaction behaviour, where *pgloader*
-will keep a separate file of rejected data, but continue trying to
-`copy` good data in your database.
+1. **Auth-switch packet type mismatch** — The `auth-switch-request` packet defines the auth plugin data as a string instead of raw octets. When the server sends an auth-switch (e.g., a `mysql_native_password` user on a MySQL 8.4+ server), the binary scramble is incorrectly converted to a Lisp string, causing a type error in the cryptographic functions. This fork patches qmynd at build time to fix this.
 
-The default PostgreSQL behaviour is transactional, which means that
-*any* erroneous line in the input data (file or remote database) will
-stop the entire bulk load for the table.
+2. **Missing RSA dependencies** — Full `caching_sha2_password` authentication over TCP requires RSA encryption. qmynd declares the needed packages (`asn1`, `trivia`) as optional, so they aren't downloaded automatically. This fork adds them as explicit dependencies.
 
-pgloader also implements data reformatting, a typical example of that
-being the transformation of MySQL datestamps `0000-00-00` and
-`0000-00-00 00:00:00` to PostgreSQL `NULL` value (because our calendar
-never had a *year zero*).
+Together, these changes enable pgloader to connect to any MySQL 8.4+ or 9.0+ server regardless of the user's authentication plugin.
 
-## Documentation
+## Docker quick start
 
-Full documentation is available online, including manual pages of all the
-pgloader sub-commands. Check out
-[https://pgloader.readthedocs.io/](https://pgloader.readthedocs.io/en/latest/).
-
-```
-$ pgloader --help
-pgloader [ option ... ] SOURCE TARGET
-  --help -h                       boolean  Show usage and exit.
-  --version -V                    boolean  Displays pgloader version and exit.
-  --quiet -q                      boolean  Be quiet
-  --verbose -v                    boolean  Be verbose
-  --debug -d                      boolean  Display debug level information.
-  --client-min-messages           string   Filter logs seen at the console (default: "warning")
-  --log-min-messages              string   Filter logs seen in the logfile (default: "notice")
-  --summary -S                    string   Filename where to copy the summary
-  --root-dir -D                   string   Output root directory. (default: #P"/tmp/pgloader/")
-  --upgrade-config -U             boolean  Output the command(s) corresponding to .conf file for v2.x
-  --list-encodings -E             boolean  List pgloader known encodings and exit.
-  --logfile -L                    string   Filename where to send the logs.
-  --load-lisp-file -l             string   Read user code from files
-  --dry-run                       boolean  Only check database connections, don't load anything.
-  --on-error-stop                 boolean  Refrain from handling errors properly.
-  --no-ssl-cert-verification      boolean  Instruct OpenSSL to bypass verifying certificates.
-  --context -C                    string   Command Context Variables
-  --with                          string   Load options
-  --set                           string   PostgreSQL options
-  --field                         string   Source file fields specification
-  --cast                          string   Specific cast rules
-  --type                          string   Force input source type
-  --encoding                      string   Source expected encoding
-  --before                        string   SQL script to run before loading the data
-  --after                         string   SQL script to run after loading the data
-  --self-upgrade                  string   Path to pgloader newer sources
-  --regress                       boolean  Drive regression testing
+```bash
+docker pull ghcr.io/limetric/pgloader:latest
 ```
 
-## Usage
+Migrate a MySQL database to PostgreSQL:
 
-You can either give a command file to pgloader or run it all from the
-command line, see the
-[pgloader quick start](https://pgloader.readthedocs.io/en/latest/tutorial/tutorial.html#pgloader-quick-start) on
-<https://pgloader.readthedocs.io> for more details.
+```bash
+docker run --rm --network host ghcr.io/limetric/pgloader:latest \
+  pgloader mysql://user:pass@localhost/sourcedb \
+           pgsql://user:pass@localhost/targetdb
+```
 
-    $ ./build/bin/pgloader --help
-    $ ./build/bin/pgloader <file.load>
+If your databases are in Docker, use service names instead of `localhost` and connect via a shared network:
 
-For example, for a full migration from SQLite:
+```bash
+docker run --rm --network my-network ghcr.io/limetric/pgloader:latest \
+  pgloader mysql://root:pass@mysql-host/mydb \
+           pgsql://postgres:pass@pg-host/mydb
+```
 
-    $ createdb newdb
-    $ pgloader ./test/sqlite/sqlite.db postgresql:///newdb
+Migrate a SQLite file (mount it into the container):
 
-Or for a full migration from MySQL, including schema definition (tables,
-indexes, foreign keys, comments) and parallel loading of the corrected data:
+```bash
+docker run --rm -v /path/to/data:/data ghcr.io/limetric/pgloader:latest \
+  pgloader /data/source.db pgsql://user:pass@localhost/targetdb
+```
 
-    $ createdb pagila
-    $ pgloader mysql://user@localhost/sakila postgresql:///pagila
+Use a `.load` command file for advanced options (cast rules, schema renaming, filtering):
 
-## LICENCE
+```bash
+docker run --rm --network host -v /path/to/commands:/commands ghcr.io/limetric/pgloader:latest \
+  pgloader /commands/migration.load
+```
 
-pgloader is available under [The PostgreSQL
-Licence](http://www.postgresql.org/about/licence/).
+## Changes from upstream
 
-## INSTALL
+- **`pgloader.asd`** — Added `#:asn1` and `#:trivia` dependencies for RSA support in `caching_sha2_password`
+- **`Makefile`** — Patches qmynd's `auth-switch-request` packet to use `(octets :eof)` instead of `(string :eof)` after cloning
+- **`Dockerfile`** — Updated base image to Debian Trixie
 
-Please see full documentation at
-[https://pgloader.readthedocs.io/](https://pgloader.readthedocs.io/en/latest/install.html).
+## Building from source
 
-If you're using debian, it's already available:
+```bash
+make clean && make
+./build/bin/pgloader --version
+```
 
-    $ apt-get install pgloader
+Or via Docker:
 
-If you're using docker, you can use the latest version built by the CI at
-each commit to the master branch:
+```bash
+docker build -t pgloader .
+```
 
-    $ docker pull ghcr.io/dimitri/pgloader:latest
-    $ docker run --rm -it ghcr.io/dimitri/pgloader:latest pgloader --version
+## Upstream documentation
+
+Full pgloader documentation is available at [pgloader.readthedocs.io](https://pgloader.readthedocs.io/en/latest/), including the command file syntax, cast rules, and supported source formats (MySQL, SQLite, MS SQL Server, CSV, fixed-width, DBF, IXF).
+
+## Licence
+
+pgloader is available under [The PostgreSQL Licence](http://www.postgresql.org/about/licence/).
