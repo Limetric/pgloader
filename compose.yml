@@ -1,12 +1,13 @@
 services:
   mysql:
-    image: mysql:9.0
+    image: mysql:latest
     environment:
       MYSQL_ROOT_PASSWORD: root
     volumes:
       - ./test/docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -proot && mysql -h 127.0.0.1 -uroot -proot -e 'SELECT 1 FROM testdb.employees LIMIT 1'"]
+      start_period: 30s
       interval: 5s
       timeout: 3s
       retries: 30
