@@ -35,14 +35,13 @@ REGRESS= allcols.load 		    \
          udc.load 		    \
          xzero.load
 
-REGRESS_NO_IP4R = $(filter-out csv-before-after.load,$(REGRESS))
+# CI target: excludes ip4r-dependent tests, includes DBF tests that require
+# SBCL (cp866 encoding) and PostgreSQL >= 10 (CREATE SCHEMA IF NOT EXISTS).
+REGRESS_CI = $(filter-out csv-before-after.load,$(REGRESS)) \
+             dbf-31.load dbf-8b.load dbf-memo.load
 
-# Those are not included in the tests because CCL doesn't have the cp866
-# encoding, and then PostgreSQL 9.6 lacks "create schema if not exists".
-#
-# dbf-memo.load
-# dbf-31.load
-# dbf-8b.load
+SQLITE_TESTS = sqlite.load sqlite-base64.load sqlite-chinook.load \
+               sqlite-chinook-noseq.load sqlite-testpk.load
 
 PGLOADER ?= ../build/bin/pgloader
 PGSUPERUSER ?= postgres
@@ -56,7 +55,9 @@ endif
 
 regress: clean-out $(addprefix regress/out/, $(REGRESS:.load=.out)) ;
 
-regress-no-ip4r: clean-out $(addprefix regress/out/, $(REGRESS_NO_IP4R:.load=.out)) ;
+regress-ci: clean-out $(addprefix regress/out/, $(REGRESS_CI:.load=.out)) ;
+
+sqlite-test: $(SQLITE_TESTS:.load=.out) ;
 
 clean clean-out:
 	rm -f regress/out/*

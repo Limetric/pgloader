@@ -57,4 +57,10 @@ jobs:
         env:
           PGHOST: localhost
           PGUSER: postgres
-        run: make PGLOADER=$(pwd)/build/bin/pgloader -C test regress-no-ip4r
+        run: make PGLOADER=$(pwd)/build/bin/pgloader -C test regress-ci
+
+      - name: Run SQLite smoke tests
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: make PGLOADER=$(pwd)/build/bin/pgloader -C test sqlite-test
