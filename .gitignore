@@ -20,3 +20,4 @@ system-index.txt
 buildapp.log
 docs/_build
 .claude/settings.local.json
+*.pgloader
