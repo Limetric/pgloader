@@ -33,7 +33,8 @@ load database
                            option-reset-sequences
                            option-foreign-keys
                            option-encoding
-                           option-identifiers-case))
+                           option-identifiers-case
+                           option-unlogged))
 
 (defrule sqlite-options (and kw-with
                              (and sqlite-option (* (and comma sqlite-option))))

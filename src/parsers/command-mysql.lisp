@@ -30,7 +30,8 @@
 			  option-index-names
 			  option-reset-sequences
 			  option-foreign-keys
-			  option-identifiers-case))
+			  option-identifiers-case
+			  option-unlogged))
 
 (defrule mysql-options (and kw-with
                             (and mysql-option (* (and comma mysql-option))))

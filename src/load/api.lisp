@@ -37,7 +37,8 @@
                              materialize-views
                              set-table-oids
                              including
-                             excluding)
+                             excluding
+                             unlogged)
   (:documentation
    "Auto-discover source schema, convert it to PostgreSQL, migrate the data
     from the source definition to PostgreSQL for all the discovered

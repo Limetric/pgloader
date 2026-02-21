@@ -137,6 +137,7 @@
 (make-option-rule create-indexes   (and kw-create (? kw-no) kw-indexes))
 (make-option-rule reset-sequences  (and kw-reset  (? kw-no) kw-sequences))
 (make-option-rule foreign-keys     (and (? kw-no) kw-foreign kw-keys))
+(make-option-rule unlogged         (and (? kw-no) kw-unlogged))
 
 (defrule option-drop-schema (and kw-drop kw-schema)
   (:constant (cons :drop-schema t)))

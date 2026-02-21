@@ -27,7 +27,8 @@
 			  option-index-names
 			  option-reset-sequences
 			  option-foreign-keys
-			  option-identifiers-case))
+			  option-identifiers-case
+			  option-unlogged))
 
 (defrule pgsql-options (and kw-with
                             (and pgsql-option (* (and comma pgsql-option))))

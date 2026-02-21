@@ -71,6 +71,7 @@
   (def-keyword-rule "timezone")
   (def-keyword-rule "decoding")
   (def-keyword-rule "truncate")
+  (def-keyword-rule "unlogged")
   (def-keyword-rule "disable")
   (def-keyword-rule "triggers")
   (def-keyword-rule "lines")

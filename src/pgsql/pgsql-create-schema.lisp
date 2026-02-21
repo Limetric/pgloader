@@ -26,25 +26,29 @@
 (defun create-table-sql-list (table-list
                               &key
                                 if-not-exists
-                                include-drop)
+                                include-drop
+                                unlogged)
   "Return the list of CREATE TABLE statements to run against PostgreSQL."
   (loop :for table :in table-list
 
      :when include-drop
      :collect (format-drop-sql table :cascade t :if-exists t)
 
-     :collect (format-create-sql table :if-not-exists if-not-exists)))
+     :collect (format-create-sql table :if-not-exists if-not-exists
+                                       :unlogged unlogged)))
 
 (defun create-table-list (table-list
                           &key
                             if-not-exists
                             include-drop
+                            unlogged
                             (client-min-messages :notice))
   "Create all tables in database dbname in PostgreSQL."
   (loop
      :for sql :in (create-table-sql-list table-list
                                          :if-not-exists if-not-exists
-                                         :include-drop include-drop)
+                                         :include-drop include-drop
+                                         :unlogged unlogged)
      :count (not (null sql)) :into nb-tables
      :when sql
      :do (pgsql-execute sql :client-min-messages client-min-messages)
@@ -121,11 +125,13 @@
                       &key
 			if-not-exists
 			include-drop
+			unlogged
 			(client-min-messages :notice))
   "Create all tables from the given database CATALOG."
   (create-table-list (table-list catalog)
                      :if-not-exists if-not-exists
                      :include-drop include-drop
+                     :unlogged unlogged
                      :client-min-messages client-min-messages))
 
 (defun create-views (catalog

@@ -19,7 +19,8 @@
                                      set-table-oids
                                      materialize-views
                                      foreign-keys
-                                     include-drop)
+                                     include-drop
+                                     unlogged)
   "Prepare the target PostgreSQL database: create tables casting datatypes
    from the MySQL definitions, prepare index definitions and create target
    tables for materialized views.
@@ -62,6 +63,7 @@
                                                   :use-result-as-rows t)
             (create-tables catalog
                            :include-drop include-drop
+                           :unlogged unlogged
                            :client-min-messages :error)))
 
         (progn
@@ -295,6 +297,30 @@
     merged))
 
 ;;;
+;;; UNLOGGED table support: convert back to LOGGED after data load.
+;;;
+(defun relog-tables (pgconn catalog)
+  "Convert all UNLOGGED tables in CATALOG back to LOGGED. This is
+   idempotent — ALTER TABLE ... SET LOGGED on an already-LOGGED table
+   is a no-op in PostgreSQL."
+  (handler-case
+      (with-pgsql-connection (pgconn)
+        (loop :for table :in (table-list catalog)
+           :for table-name := (format-table-name table)
+           :do (handler-case
+                   (progn
+                     (pomo:execute
+                      (format nil "ALTER TABLE ~a SET LOGGED;" table-name))
+                     (log-message :notice "Converted ~a back to LOGGED"
+                                  table-name))
+                 (cl-postgres:database-error (e)
+                   (log-message :warning
+                                "Failed to SET LOGGED on ~a: ~a"
+                                table-name e)))))
+    (condition (e)
+      (log-message :error "Failed to reconnect for relog: ~a" e))))
+
+;;;
 ;;; Generic enough implementation of the copy-database method.
 ;;;
 (defmethod copy-database ((copy db-copy)
@@ -324,10 +350,16 @@
                             set-table-oids
                             alter-table
                             alter-schema
+                            (unlogged nil)
 			    materialize-views)
   "Export database source data and Import it into PostgreSQL"
   (log-message :log "Migrating from ~a" (source-db copy))
   (log-message :log "Migrating into ~a" (target-db copy))
+  (when unlogged
+    (log-message :warning
+                 "Using UNLOGGED tables for faster loading. A crash ~
+                  during migration will result in data loss — the ~
+                  source database must remain available for retry."))
   (let* ((*on-error-stop* on-error-stop)
          (copy-data      (or data-only (not schema-only)))
          (create-ddl     (or schema-only (not data-only)))
@@ -437,7 +469,8 @@
                                   :include-drop include-drop
                                   :foreign-keys foreign-keys
                                   :set-table-oids set-table-oids
-                                  :materialize-views materialize-views)
+                                  :materialize-views materialize-views
+                                  :unlogged unlogged)
 
           ;; if there's an AFTER SCHEMA DO/EXECUTE command, now is the time
           ;; to run it.
@@ -460,118 +493,134 @@
 
         (return-from copy-database)))
 
-    (loop
-       :for table :in (optimize-table-copy-ordering catalog)
+    (flet ((do-data-copy-and-complete ()
+       (loop
+          :for table :in (optimize-table-copy-ordering catalog)
 
-       :do (let ((table-source (instanciate-table-copy-object copy table)))
-             ;; first COPY the data from source to PostgreSQL, using copy-kernel
-             (if (not copy-data)
-                 ;; start indexing straight away then
-                 (when create-indexes
-                   (alexandria:appendf
-                    pkeys
-                    (create-indexes-in-kernel (target-db copy)
-                                              table
-                                              idx-kernel
-                                              idx-channel)))
+          :do (let ((table-source (instanciate-table-copy-object copy table)))
+                ;; first COPY the data from source to PostgreSQL, using copy-kernel
+                (if (not copy-data)
+                    ;; start indexing straight away then
+                    (when create-indexes
+                      (alexandria:appendf
+                       pkeys
+                       (create-indexes-in-kernel (target-db copy)
+                                                 table
+                                                 idx-kernel
+                                                 idx-channel)))
 
-                 ;; prepare the writers-count hash-table, as we start
-                 ;; copy-from, we have concurrency tasks writing.
-                 (progn                 ; when copy-data
-                   (setf (gethash table writers-count) concurrency)
+                    ;; prepare the writers-count hash-table, as we start
+                    ;; copy-from, we have concurrency tasks writing.
+                    (progn                 ; when copy-data
+                      (setf (gethash table writers-count) concurrency)
 
-                   (incf task-count
-                         (copy-from table-source
-                                    :concurrency concurrency
-                                    :multiple-readers multiple-readers
-                                    :kernel copy-kernel
-                                    :channel copy-channel
-                                    :on-error-stop on-error-stop
-                                    :disable-triggers disable-triggers))))))
+                      (incf task-count
+                            (copy-from table-source
+                                       :concurrency concurrency
+                                       :multiple-readers multiple-readers
+                                       :kernel copy-kernel
+                                       :channel copy-channel
+                                       :on-error-stop on-error-stop
+                                       :disable-triggers disable-triggers))))))
 
-    ;; now end the kernels
-    ;; and each time a table is done, launch its indexing
-    (when copy-data
-      (let ((lp:*kernel* copy-kernel))
-        (with-stats-collection ("COPY Threads Completion" :section :post
-                                                          :use-result-as-read t
-                                                          :use-result-as-rows t)
-          (loop :repeat task-count
-             :do (destructuring-bind (task table seconds)
-                     (lp:receive-result copy-channel)
-                   (log-message :debug
-                                "Finished processing ~a for ~s ~50T~6$s"
-                                task (format-table-name table) seconds)
-                   (when (eq :writer task)
-                     ;;
-                     ;; Start the CREATE INDEX parallel tasks only when
-                     ;; the data has been fully copied over to the
-                     ;; corresponding table, that's when the writers
-                     ;; count is down to zero.
-                     ;;
-                     (decf (gethash table writers-count))
-                     (log-message :debug "writers-counts[~a] = ~a"
-                                  (format-table-name table)
-                                  (gethash table writers-count))
-
-                     (when (and create-indexes
-                                (zerop (gethash table writers-count)))
-
-                       (let* ((stats   pgloader.monitor::*sections*)
-                              (section (get-state-section stats :data))
-                              (table-stats (pgstate-get-label section table))
-                              (pprint-secs
-                               (pgloader.state::format-interval seconds nil)))
-                         ;; in CCL we have access to the *sections* dynamic
-                         ;; binding from another thread, in SBCL we access
-                         ;; an empty copy.
-                         (log-message :notice
-                                      "DONE copying ~a in ~a~@[ for ~d rows~]"
+       ;; now end the kernels
+       ;; and each time a table is done, launch its indexing
+       (when copy-data
+         (let ((lp:*kernel* copy-kernel))
+           (with-stats-collection ("COPY Threads Completion" :section :post
+                                                             :use-result-as-read t
+                                                             :use-result-as-rows t)
+             (loop :repeat task-count
+                :do (destructuring-bind (task table seconds)
+                        (lp:receive-result copy-channel)
+                      (log-message :debug
+                                   "Finished processing ~a for ~s ~50T~6$s"
+                                   task (format-table-name table) seconds)
+                      (when (eq :writer task)
+                        ;;
+                        ;; Start the CREATE INDEX parallel tasks only when
+                        ;; the data has been fully copied over to the
+                        ;; corresponding table, that's when the writers
+                        ;; count is down to zero.
+                        ;;
+                        (decf (gethash table writers-count))
+                        (log-message :debug "writers-counts[~a] = ~a"
                                      (format-table-name table)
-                                     pprint-secs
-                                     (when table-stats
-                                       (pgtable-rows table-stats))))
-                       (alexandria:appendf
-                        pkeys
-                        (create-indexes-in-kernel (target-db copy)
-                                                  table
-                                                  idx-kernel
-                                                  idx-channel)))))
-             :finally (progn
-                        (lp:end-kernel :wait nil)
-                        (return worker-count))))))
+                                     (gethash table writers-count))
 
-    (log-message :info "Done with COPYing data, waiting for indexes")
+                        (when (and create-indexes
+                                   (zerop (gethash table writers-count)))
 
-    (when create-indexes
-      (let ((lp:*kernel* idx-kernel))
-        ;; wait until the indexes are done being built...
-        ;; don't forget accounting for that waiting time.
-        (with-stats-collection ("Index Build Completion" :section :post
-                                                         :use-result-as-read t
-                                                         :use-result-as-rows t)
-          (loop :for count :below (count-indexes catalog)
-             :do (lp:receive-result idx-channel))
-          (lp:end-kernel :wait t)
-          (log-message :info "Done waiting for indexes")
-          (count-indexes catalog))))
+                          (let* ((stats   pgloader.monitor::*sections*)
+                                 (section (get-state-section stats :data))
+                                 (table-stats (pgstate-get-label section table))
+                                 (pprint-secs
+                                  (pgloader.state::format-interval seconds nil)))
+                            ;; in CCL we have access to the *sections* dynamic
+                            ;; binding from another thread, in SBCL we access
+                            ;; an empty copy.
+                            (log-message :notice
+                                         "DONE copying ~a in ~a~@[ for ~d rows~]"
+                                        (format-table-name table)
+                                        pprint-secs
+                                        (when table-stats
+                                          (pgtable-rows table-stats))))
+                          (alexandria:appendf
+                           pkeys
+                           (create-indexes-in-kernel (target-db copy)
+                                                     table
+                                                     idx-kernel
+                                                     idx-channel)))))
+                :finally (progn
+                           (lp:end-kernel :wait nil)
+                           (return worker-count))))))
 
-    ;;
-    ;; Complete the PostgreSQL database before handing over.
-    ;;
-    (complete-pgsql-database copy
-                             catalog
-                             pkeys
-                             :foreign-keys foreign-keys
-                             :create-indexes create-indexes
-                             ;; only create triggers (for default values)
-                             ;; when we've been responsible for creating the
-                             ;; tables -- otherwise assume the schema is
-                             ;; good as it is
-                             :create-triggers create-tables
-                             :reset-sequences reset-sequences)
+       (log-message :info "Done with COPYing data, waiting for indexes")
 
-    ;;
-    ;; Time to cleanup!
-    ;;
-    (cleanup copy catalog :materialize-views materialize-views)))
+       (when create-indexes
+         (let ((lp:*kernel* idx-kernel))
+           ;; wait until the indexes are done being built...
+           ;; don't forget accounting for that waiting time.
+           (with-stats-collection ("Index Build Completion" :section :post
+                                                            :use-result-as-read t
+                                                            :use-result-as-rows t)
+             (loop :for count :below (count-indexes catalog)
+                :do (lp:receive-result idx-channel))
+             (lp:end-kernel :wait t)
+             (log-message :info "Done waiting for indexes")
+             (count-indexes catalog))))
+
+       ;; Convert UNLOGGED tables back to LOGGED before adding
+       ;; constraints, triggers, and sequences
+       (when unlogged
+         (log-message :notice "Converting UNLOGGED tables back to LOGGED")
+         (relog-tables (target-db copy) catalog))
+
+       ;;
+       ;; Complete the PostgreSQL database before handing over.
+       ;;
+       (complete-pgsql-database copy
+                                catalog
+                                pkeys
+                                :foreign-keys foreign-keys
+                                :create-indexes create-indexes
+                                ;; only create triggers (for default values)
+                                ;; when we've been responsible for creating the
+                                ;; tables -- otherwise assume the schema is
+                                ;; good as it is
+                                :create-triggers create-tables
+                                :reset-sequences reset-sequences)
+
+       ;;
+       ;; Time to cleanup!
+       ;;
+       (cleanup copy catalog :materialize-views materialize-views)))
+
+      ;; When using UNLOGGED tables, ensure we always convert back to
+      ;; LOGGED even on abnormal exit (thread errors, return-from, etc.)
+      (if unlogged
+          (unwind-protect
+               (do-data-copy-and-complete)
+            ;; cleanup: idempotent — safe to call even if relog already ran
+            (relog-tables (target-db copy) catalog))
+          (do-data-copy-and-complete)))))

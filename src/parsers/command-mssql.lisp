@@ -35,7 +35,8 @@
                           option-reset-sequences
 			  option-foreign-keys
                           option-encoding
-                          option-identifiers-case))
+                          option-identifiers-case
+                          option-unlogged))
 
 (defrule mssql-options (and kw-with
                             (and mssql-option (* (and comma mssql-option))))

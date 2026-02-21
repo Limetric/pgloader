@@ -61,14 +61,16 @@
 ;;;
 ;;; Tables
 ;;;
-(defmethod format-create-sql ((table table) &key (stream nil) if-not-exists)
+(defmethod format-create-sql ((table table) &key (stream nil) if-not-exists
+                                                  unlogged)
   ;;
   ;; In case stream would be nil, which means return a string, we use this
   ;; with-output-to-string form and format its output in stream...
   ;;
   (format stream "~a"
           (with-output-to-string (s)
-            (format s "CREATE TABLE~:[~; IF NOT EXISTS~] ~a ~%(~%"
+            (format s "CREATE~:[~; UNLOGGED~] TABLE~:[~; IF NOT EXISTS~] ~a ~%(~%"
+                    unlogged
                     if-not-exists
                     (format-table-name table))
             (let ((max (reduce #'max
