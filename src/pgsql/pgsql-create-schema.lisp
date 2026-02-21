@@ -255,12 +255,26 @@
 ;;;
 ;;; Parallel index building.
 ;;;
+(defun parallel-maintenance-workers-sql (pgconn)
+  "Return a SET statement for max_parallel_maintenance_workers if the
+   PostgreSQL version supports it (11+) and we're not on Redshift.
+   Returns NIL when the feature is not available."
+  (let ((major (handler-case
+                   (parse-integer (pgconn-major-version pgconn))
+                 (condition () nil)))
+        (variant (handler-case
+                     (pgconn-variant pgconn)
+                   (condition () :pgdg))))
+    (when (and major (>= major 11) (not (eq :redshift variant)))
+      "SET max_parallel_maintenance_workers TO 2;")))
+
 (defun create-indexes-in-kernel (pgconn table kernel channel
 				 &key (label "Create Indexes"))
   "Create indexes for given table in dbname, using given lparallel KERNEL
    and CHANNEL so that the index build happen in concurrently with the data
    copying."
-  (let* ((lp:*kernel* kernel))
+  (let* ((lp:*kernel* kernel)
+         (set-workers-sql (parallel-maintenance-workers-sql pgconn)))
     (loop
        :for index :in (table-index-list table)
        :for pkey := (multiple-value-bind (sql pkey)
@@ -271,7 +285,10 @@
                                       #'pgsql-connect-and-execute-with-timing
                                       ;; each thread must have its own connection
                                       (clone-connection pgconn)
-                                      :post label sql)
+                                      :post label
+                                      (if set-workers-sql
+                                          (list set-workers-sql sql)
+                                          sql))
 
                       ;; return the pkey "upgrade" statement
                       pkey)
