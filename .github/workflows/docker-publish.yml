@@ -18,8 +18,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Run migration and verify
-        run: docker compose up --build --exit-code-from verify
+      - name: Run migration
+        run: docker compose run --build --rm pgloader
+
+      - name: Verify migrated data
+        run: docker compose run --rm verify
 
       - name: Teardown
         if: always()
