@@ -1,14 +1,12 @@
 # pgloader (MySQL 8.4+ compatibility fork)
 
-This is a fork of [dimitri/pgloader](https://github.com/dimitri/pgloader) that fixes MySQL 8.4+ and 9.0+ connectivity.
+A fork of [dimitri/pgloader](https://github.com/dimitri/pgloader) with MySQL 8.4+ compatibility fixes, performance optimizations, and a heap size fix for large migrations.
 
-Upstream pgloader fails to connect to MySQL 8.4+ because these versions use `caching_sha2_password` as the default authentication method. The underlying MySQL protocol library ([qmynd](https://github.com/qitab/qmynd)) has two issues:
+**What's different from upstream:**
 
-1. **Auth-switch packet type mismatch** — The `auth-switch-request` packet defines the auth plugin data as a string instead of raw octets. When the server sends an auth-switch (e.g., a `mysql_native_password` user on a MySQL 8.4+ server), the binary scramble is incorrectly converted to a Lisp string, causing a type error in the cryptographic functions. This fork patches qmynd at build time to fix this.
-
-2. **Missing RSA dependencies** — Full `caching_sha2_password` authentication over TCP requires RSA encryption. qmynd declares the needed packages (`asn1`, `trivia`) as optional, so they aren't downloaded automatically. This fork adds them as explicit dependencies.
-
-Together, these changes enable pgloader to connect to any MySQL 8.4+ or 9.0+ server regardless of the user's authentication plugin.
+- **MySQL 8.4+ / 9.0+ support** — Fixes `caching_sha2_password` authentication so pgloader works with modern MySQL servers
+- **Performance optimizations** — Automatic bulk-load GUCs, parallel index workers, adaptive batch sizing, MySQL read tuning, and opt-in UNLOGGED table loading
+- **Heap size fix** — The Docker image actually uses the configured 16 GB heap instead of SBCL's default 1 GB, preventing heap exhaustion on large migrations
 
 ## Docker quick start
 
@@ -50,7 +48,15 @@ docker run --rm --network host -v /path/to/commands:/commands ghcr.io/limetric/p
 
 ### MySQL 8.4+ / 9.0+ compatibility
 
-- **`pgloader.asd`** — Added `#:asn1` and `#:trivia` dependencies for RSA support in `caching_sha2_password`
+Upstream pgloader fails to connect to MySQL 8.4+ because these versions use `caching_sha2_password` as the default authentication method. The underlying MySQL protocol library ([qmynd](https://github.com/qitab/qmynd)) has two issues:
+
+1. **Auth-switch packet type mismatch** — The `auth-switch-request` packet defines the auth plugin data as a string instead of raw octets. When the server sends an auth-switch (e.g., a `mysql_native_password` user on a MySQL 8.4+ server), the binary scramble is incorrectly converted to a Lisp string, causing a type error in the cryptographic functions. This fork patches qmynd at build time to fix this.
+
+2. **Missing RSA dependencies** — Full `caching_sha2_password` authentication over TCP requires RSA encryption. qmynd declares the needed packages (`asn1`, `trivia`) as optional, so they aren't downloaded automatically. This fork adds them as explicit dependencies.
+
+**Files changed:**
+
+- **`pgloader.asd`** — Added `#:asn1` and `#:trivia` dependencies
 - **`Makefile`** — Patches qmynd's `auth-switch-request` packet to use `(octets :eof)` instead of `(string :eof)` after cloning
 - **`Dockerfile`** — Updated base image to Debian Trixie
 
