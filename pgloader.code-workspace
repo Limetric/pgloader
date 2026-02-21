@@ -1,0 +1,18 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.exclude": {
+			"**/node_modules/": true,
+			"**/build/": true
+		},
+		"editor.formatOnSave": true,
+		"files.eol": "\n",
+		"editor.quickSuggestions": {
+			"strings": "on"
+		}
+	}
+}
