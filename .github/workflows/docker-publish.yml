@@ -58,6 +58,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.ref_type == 'tag' || github.ref_name == 'master' }}
+          push: ${{ github.ref_type == 'tag' || github.ref_name == 'main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
