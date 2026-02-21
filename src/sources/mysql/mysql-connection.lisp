@@ -48,6 +48,15 @@
   (loop :for (name . value) :in *mysql-settings*
      :for sql := (format nil "set ~a = ~a;" name value)
      :do (query myconn sql))
+
+  ;; auto-set read-tuning session variables for better migration throughput
+  (handler-case
+      (progn
+        (query myconn "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;")
+        (query myconn "SET SESSION net_write_timeout = 600;"))
+    (condition (e)
+      (log-message :warning "MySQL read-tuning: ~a (skipping)" e)))
+
   ;; return the connection object
   myconn)
 

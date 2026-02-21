@@ -275,6 +275,26 @@
 
 
 ;;;
+;;; Auto-set bulk-load GUCs for better migration throughput.
+;;;
+(defparameter *bulk-load-gucs*
+  '(("synchronous_commit"    . "off")
+    ("maintenance_work_mem"  . "512MB")
+    ("work_mem"              . "64MB"))
+  "Session-settable GUCs that improve bulk-load performance.
+   These are merged into *pg-settings* before worker kernels are created,
+   without overriding user-supplied values.")
+
+(defun merge-bulk-load-gucs (user-gucs)
+  "Merge *bulk-load-gucs* into USER-GUCS, keeping user-supplied values
+   when they conflict. Returns a new alist."
+  (let ((merged (copy-list user-gucs)))
+    (loop :for (name . value) :in *bulk-load-gucs*
+       :unless (assoc name merged :test #'string-equal)
+       :do (push (cons name value) merged))
+    merged))
+
+;;;
 ;;; Generic enough implementation of the copy-database method.
 ;;;
 (defmethod copy-database ((copy db-copy)
@@ -335,6 +355,15 @@
               ;; if we didn't create the tables, we are re-installing the
               ;; pre-existing indexes
               (not create-tables)))
+
+         ;; auto-set bulk-load GUCs for better throughput, unless Redshift
+         (*pg-settings* (if (eq :redshift (pgconn-variant (target-db copy)))
+                            *pg-settings*
+                            (progn
+                              (log-message :notice
+                                           "Auto-setting bulk-load GUCs for ~
+                                            improved throughput.")
+                              (merge-bulk-load-gucs *pg-settings*))))
 
          (copy-kernel  (make-kernel worker-count))
          (copy-channel (let ((lp:*kernel* copy-kernel)) (lp:make-channel)))

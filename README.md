@@ -48,13 +48,19 @@ docker run --rm --network host -v /path/to/commands:/commands ghcr.io/limetric/p
 
 ## Changes from upstream
 
+### MySQL 8.4+ / 9.0+ compatibility
+
 - **`pgloader.asd`** — Added `#:asn1` and `#:trivia` dependencies for RSA support in `caching_sha2_password`
 - **`Makefile`** — Patches qmynd's `auth-switch-request` packet to use `(octets :eof)` instead of `(string :eof)` after cloning
 - **`Dockerfile`** — Updated base image to Debian Trixie
 
-### Heap size fix
+### Performance optimizations
 
-Upstream's `make save` target (used by the Dockerfile) does not pass `--dynamic-space-size` to SBCL, so the saved image always gets SBCL's default 1 GB heap regardless of the `DYNSIZE` variable. This causes heap exhaustion on large migrations. This fork fixes the `save` target to respect `DYNSIZE` (default 16 GB).
+The following optimizations are applied automatically during database migrations:
+
+- **Bulk-load session GUCs** — Automatically sets `synchronous_commit=off`, `maintenance_work_mem=512MB`, and `work_mem=64MB` on PostgreSQL writer connections for improved throughput. User-supplied values via `SET` in `.load` files are never overridden. Skipped for Redshift targets.
+- **Parallel index workers** — Sets `max_parallel_maintenance_workers=2` on each index creation connection (PostgreSQL 11+), allowing individual CREATE INDEX operations to use parallel workers alongside the existing cross-table parallel index building.
+- **MySQL read tuning** — Sets `REPEATABLE READ` isolation level and `net_write_timeout=600` on MySQL reader connections for consistent reads and tolerance of slow networks during large migrations.
 
 ## Building from source
 
