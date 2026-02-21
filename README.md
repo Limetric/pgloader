@@ -65,6 +65,11 @@ The following optimizations are applied automatically during database migrations
 - **Bulk-load session GUCs** — Automatically sets `synchronous_commit=off`, `maintenance_work_mem=512MB`, and `work_mem=64MB` on PostgreSQL writer connections for improved throughput. User-supplied values via `SET` in `.load` files are never overridden. Skipped for Redshift targets.
 - **Parallel index workers** — Sets `max_parallel_maintenance_workers=2` on each index creation connection (PostgreSQL 11+), allowing individual CREATE INDEX operations to use parallel workers alongside the existing cross-table parallel index building.
 - **MySQL read tuning** — Sets `REPEATABLE READ` isolation level and `net_write_timeout=600` on MySQL reader connections for consistent reads and tolerance of slow networks during large migrations.
+- **Adaptive batch sizing** — After the first batch per table, computes average row size and adjusts subsequent batches to target ~50 MB (up to 100k rows). Reduces round-trip overhead for tables with small rows.
+
+The following optimizations are available as opt-in `.load` file options:
+
+- **UNLOGGED tables** — `WITH unlogged` creates target tables as UNLOGGED during the load (no WAL writes), then converts them back to LOGGED after data and indexes are complete. Provides 2-3x write throughput improvement. An `unwind-protect` cleanup ensures tables are re-logged even if the load is interrupted. Only safe for fresh migrations where crash-time data loss is acceptable.
 
 ## Building from source
 
