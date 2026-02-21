@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim AS builder
+FROM debian:trixie-slim AS builder
 
   RUN apt-get update \
       && apt-get install -y --no-install-recommends \
@@ -30,7 +30,7 @@ ARG DYNSIZE=16384
       && cd /opt/src/pgloader \
       && make DYNSIZE=$DYNSIZE clones save
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
   RUN apt-get update \
       && apt-get install -y --no-install-recommends \
