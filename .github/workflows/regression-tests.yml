@@ -1,10 +1,6 @@
 name: Regression Tests
 
-on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
+on: [push]
 
 jobs:
   regression-test:
@@ -54,6 +50,7 @@ jobs:
           createdb -O postgres pgloader
           createdb -O postgres stocks
           psql -d pgloader -c 'create schema expected'
+          psql -d pgloader -c 'create schema csv'
           psql -d stocks -f test/bossa.sql
 
       - name: Run regression tests
