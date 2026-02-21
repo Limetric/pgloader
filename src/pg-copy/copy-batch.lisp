@@ -33,6 +33,27 @@
   ;; 0.7 < 0.7 + (random 0.6) < 1.3
   (truncate (* batch-rows (+ 0.7 (random 0.6)))))
 
+;;;
+;;; Adaptive batch sizing: after the first batch, compute optimal row
+;;; count targeting ~50MB per batch based on observed average row size.
+;;;
+(defparameter *adaptive-batch-target-bytes* (* 50 1024 1024)
+  "Target batch size in bytes for adaptive sizing (50 MB).")
+
+(defparameter *adaptive-batch-max-rows* 100000
+  "Hard upper limit on rows per batch for adaptive sizing.")
+
+(defun compute-adapted-batch-rows (total-rows total-bytes)
+  "Given observed TOTAL-ROWS and TOTAL-BYTES from a completed batch,
+   compute an optimal row count targeting *adaptive-batch-target-bytes*.
+   Returns nil if we can't compute (zero rows or bytes)."
+  (when (and (plusp total-rows) (plusp total-bytes))
+    (let* ((avg-row-bytes (/ total-bytes total-rows))
+           (target-rows   (truncate *adaptive-batch-target-bytes* avg-row-bytes)))
+      ;; clamp between current default and hard max
+      (max *copy-batch-rows*
+           (min target-rows *adaptive-batch-max-rows*)))))
+
 (defun batch-oversized-p (batch)
   "Return a generalized boolean that is true only when BATCH is considered
    over-sized when its size in BYTES is compared *copy-batch-size*."
@@ -61,18 +82,23 @@
       (push-row current-batch pg-vector-row bytes))))
 
 (defun add-row-to-current-batch (table columns copy nbcols batch row
-                                 &key send-batch-fn format-row-fn)
+                                 &key send-batch-fn format-row-fn
+                                      adapted-batch-rows)
   "Add another ROW we just received to CURRENT-BATCH, and prepare a new
    batch if needed. The current-batch (possibly a new one) is returned. When
    the batch is full, the function SEND-BATCH-FN is called with TABLE,
-   COLUMNS and the full BATCH as parameters."
+   COLUMNS and the full BATCH as parameters. When ADAPTED-BATCH-ROWS is
+   non-nil, new batches use that row count instead of the default."
   (let ((seconds       0)
         (current-batch batch))
     ;; if current-batch is full, send data to PostgreSQL
     ;; and prepare a new batch
     (when (batch-full-p current-batch)
       (incf seconds (funcall send-batch-fn table columns current-batch))
-      (setf current-batch (make-batch))
+      (setf current-batch (if adapted-batch-rows
+                              (make-batch :max-count
+                                          (init-batch-max-count adapted-batch-rows))
+                              (make-batch)))
 
       ;; give a little help to our friend, now is a good time
       ;; to garbage collect

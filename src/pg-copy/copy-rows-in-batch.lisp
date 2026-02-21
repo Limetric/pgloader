@@ -8,8 +8,9 @@
    PostgreSQL as soon as the batch is full. This allows sophisticated error
    handling and recovery, where we can retry rows that are not rejected by
    PostgreSQL."
-  (let ((seconds       0)
-        (current-batch (make-batch)))
+  (let ((seconds            0)
+        (adapted-batch-rows nil)
+        (current-batch      (make-batch)))
     (loop
        :for row := (lq:pop-queue queue)
        :until (eq :end-of-data row)
@@ -17,7 +18,20 @@
                (add-row-to-current-batch table columns copy nbcols
                                          current-batch row
                                          :send-batch-fn (function send-batch)
-                                         :format-row-fn #'prepare-and-format-row)
+                                         :format-row-fn #'prepare-and-format-row
+                                         :adapted-batch-rows adapted-batch-rows)
+             ;; when a new batch was created, compute adapted sizing
+             ;; from the just-completed batch
+             (when (and (not (eq maybe-new-batch current-batch))
+                        (null adapted-batch-rows))
+               (let ((rows (compute-adapted-batch-rows
+                            (batch-count current-batch)
+                            (batch-bytes current-batch))))
+                 (when (and rows (> rows *copy-batch-rows*))
+                   (setf adapted-batch-rows rows)
+                   (log-message :debug
+                                "Adaptive batch sizing for ~a: ~d rows/batch"
+                                (format-table-name table) rows))))
              (setf current-batch maybe-new-batch)
              (incf seconds seconds-in-this-batch)))
 
