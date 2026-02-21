@@ -244,8 +244,10 @@
         ;; keep as is.
         cl-postgres::*unix-socket-dir*)))
 
-(defun set-session-gucs (alist &key transaction database)
-  "Set given GUCs to given values for the current session."
+(defun set-session-gucs (alist &key transaction database (on-error :stop))
+  "Set given GUCs to given values for the current session.
+   ON-ERROR can be :stop (default, propagate errors) or :warn (log warning
+   and skip the failing GUC)."
   (let ((pomo:*database* (or database pomo:*database*)))
     (loop
        :for (name . value) :in alist
@@ -260,7 +262,14 @@
                               transaction name value)))
        :do (progn                       ; indent helper
              (log-message :debug set)
-             (pomo:execute set)))))
+             (if (eq on-error :warn)
+                 (handler-case
+                     (pomo:execute set)
+                   (cl-postgres:database-error (e)
+                     (log-message :warning
+                                  "Failed to set ~a to ~a: ~a (skipping)"
+                                  name value e)))
+                 (pomo:execute set))))))
 
 
 
