@@ -76,6 +76,7 @@ clean:
 
 $(QLDIR)/local-projects/qmynd:
 	git clone --depth 1 https://github.com/qitab/qmynd.git $@
+	sed -i 's/(auth-plugin-data :mysql-type (string :eof))/(auth-plugin-data :mysql-type (octets :eof))/' $@/src/mysql-protocol/handshake.lisp
 
 $(QLDIR)/local-projects/cl-ixf:
 	git clone --depth 1 https://github.com/dimitri/cl-ixf.git $@
