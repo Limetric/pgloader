@@ -35,6 +35,8 @@ REGRESS= allcols.load 		    \
          udc.load 		    \
          xzero.load
 
+REGRESS_NO_IP4R = $(filter-out csv-before-after.load,$(REGRESS))
+
 # Those are not included in the tests because CCL doesn't have the cp866
 # encoding, and then PostgreSQL 9.6 lacks "create schema if not exists".
 #
@@ -53,6 +55,8 @@ EXTRA_OPTS = --batch --heap-reserve 150g
 endif
 
 regress: clean-out $(addprefix regress/out/, $(REGRESS:.load=.out)) ;
+
+regress-no-ip4r: clean-out $(addprefix regress/out/, $(REGRESS_NO_IP4R:.load=.out)) ;
 
 clean clean-out:
 	rm -f regress/out/*

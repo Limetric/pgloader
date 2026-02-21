@@ -1,0 +1,63 @@
+name: Regression Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  regression-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_DB: pgloader
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl libsqlite3-dev freetds-dev libzip-dev postgresql-client
+
+      - name: Cache Quicklisp
+        uses: actions/cache@v4
+        with:
+          path: build/quicklisp
+          key: quicklisp-${{ hashFiles('pgloader.asd') }}
+          restore-keys: quicklisp-
+
+      - name: Build pgloader
+        run: make pgloader
+
+      - name: Prepare test databases
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: |
+          dropdb --if-exists pgloader
+          dropdb --if-exists stocks
+          createdb -O postgres pgloader
+          createdb -O postgres stocks
+          psql -d pgloader -c 'create schema expected'
+          psql -d stocks -f test/bossa.sql
+
+      - name: Run regression tests
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: make PGLOADER=$(pwd)/build/bin/pgloader -C test regress-no-ip4r
