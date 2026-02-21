@@ -52,6 +52,10 @@ docker run --rm --network host -v /path/to/commands:/commands ghcr.io/limetric/p
 - **`Makefile`** — Patches qmynd's `auth-switch-request` packet to use `(octets :eof)` instead of `(string :eof)` after cloning
 - **`Dockerfile`** — Updated base image to Debian Trixie
 
+### Heap size fix
+
+Upstream's `make save` target (used by the Dockerfile) does not pass `--dynamic-space-size` to SBCL, so the saved image always gets SBCL's default 1 GB heap regardless of the `DYNSIZE` variable. This causes heap exhaustion on large migrations. This fork fixes the `save` target to respect `DYNSIZE` (default 16 GB).
+
 ## Building from source
 
 ```bash
