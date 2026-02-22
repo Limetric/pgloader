@@ -1,5 +1,7 @@
 # pgloader (MySQL 8.4+ compatibility fork)
 
+> **Looking for a modern alternative?** Check out [**pgferry**](https://github.com/Limetric/pgferry) — our easier and more robust replacement for pgloader.
+
 A fork of [dimitri/pgloader](https://github.com/dimitri/pgloader) with MySQL 8.4+ compatibility fixes, performance optimizations, and a heap size fix for large migrations.
 
 **What's different from upstream:**
